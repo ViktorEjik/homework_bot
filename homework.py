@@ -19,6 +19,7 @@ logging.basicConfig(
     filemode="w",
     format="%(asctime)s, %(levelname)s, %(funcName)s, %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 PRACTICUM_TOKEN = os.getenv("PRACTICUM_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -44,9 +45,8 @@ def check_tokens():
         "TELEGRAM_TOKEN": TELEGRAM_TOKEN,
         "TELEGRAM_CHAT_ID": TELEGRAM_CHAT_ID,
     }
-    logger = logging.getLogger(__name__)
     for env_elem in env:
-        if env[env_elem] is None or env[env_elem] == "":
+        if not env[env_elem]:
             logger.critical('"{}" is None'.format(env_elem))
             return False
     logger.debug("Environment filled in successfull!")
@@ -58,15 +58,14 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
     except Exception as error:
-        logging.error(f"Error sending message {error}")
+        logger.error(f"Error sending message {error}")
         raise Exception(f"Error sending message {error}")
     else:
-        logging.debug("Message was sent successfully!")
+        logger.debug("Message was sent successfully!")
 
 
 def get_api_answer(timestamp):
     """Обращается к API и преобразует отвек к dict."""
-    logger = logging.getLogger(__name__)
     try:
         response = requests.get(
             url=ENDPOINT, headers=HEADERS, params={"from_date": timestamp}
@@ -75,26 +74,24 @@ def get_api_answer(timestamp):
         logger, error(error)
         raise error
 
-    if response.status_code is not HTTPStatus.OK:
+    if response.status_code != HTTPStatus.OK:
         logger.error(
             f"Request to '{ENDPOINT}'"
-            f"finised with {response.status_code}"
-        )
+            f"finised with {response.status_code}")
         raise APIError(f"Status code of requests {response.status_code}")
     try:
         return response.json()
     except Exception as error:
-        logging.error(error)
+        logger.error(error)
         raise error
 
 
 def check_response(response):
     """Проверяет наличие необходимых ключей в ответе от API."""
-    logger = logging.getLogger(__name__)
     if not isinstance(response, dict):
         logger.debug("Expected dictionary from API")
         raise TypeError("Ожидался словарь от API")
-    if ("homeworks" not in response) or "current_date" not in response:
+    if "homeworks" not in response or "current_date" not in response:
         logger.debug(
             "Expected dictionary with key 'homework' and 'current_date'")
         raise TypeError("В ответе нет ключа 'homework' или 'current_date'")
@@ -107,7 +104,10 @@ def check_response(response):
 
 def parse_status(homework):
     """Возвращает статус работы."""
-    logger = logging.getLogger(__name__)
+    if not isinstance(homework, dict):
+        logger.error('"homework" is not "dict"')
+        raise TypeError(f"Ожидался словарь, а не {type(homework)}")
+
     homework_name = homework.get("homework_name")
     if homework_name is None:
         logger.debug("'homework' dose not have key 'homework_name'")
@@ -141,6 +141,7 @@ def main():
             homeworks = check_response(response)
 
             homeworks = response["homeworks"]
+            answers_before = answers
             for homework in homeworks:
                 message = parse_status(homework)
 
@@ -155,9 +156,12 @@ def main():
                     answers[homework_name] = status
                     send_message(bot, message)
 
+            if answers == answers_before:
+                logger.debug("No updates")
+
         except Exception as error:
             message = f"Сбой в работе программы: {error}"
-            logging.error(error)
+            logger.error(error)
             send_message(bot, message=message)
 
         finally:
